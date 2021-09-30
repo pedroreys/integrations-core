@@ -183,67 +183,64 @@ def dep(check, require_base_check_version, min_base_check_version):
                 echo_failure(message)
                 annotate_error(agent_dependencies_file, message)
 
-        for name, versions in sorted(check_base_dependencies.items()):
-            if not verify_base_dependency(
-                'Base Checks', name, versions, require_base_check_version, min_base_check_version
-            ):
-                failed = True
+    check_base_dependencies, check_base_errors = read_check_base_dependencies(checks)
+    check_dependencies, check_errors = read_check_dependencies(checks)
 
-        # If validating a single check, whether all Agent dependencies are included in check dependencies is irrelevant.
-        if check is not None:
-            agent_dependencies = {}
+    for name, versions in sorted(check_base_dependencies.items()):
+        if not verify_base_dependency(
+            'Base Checks', name, versions, require_base_check_version, min_base_check_version
+        ):
+            failed = True
 
-        for name, versions in sorted(agent_dependencies.items()):
-            if not verify_dependency('Agent', name, versions):
-                failed = True
+    # If validating a single check, whether all Agent dependencies are included in check dependencies is irrelevant.
+    if check is not None:
+        agent_dependencies = {}
 
-            if name not in check_dependencies:
-                failed = True
-                message = f'Stale dependency needs to be removed by syncing: {name}'
-                echo_failure(message)
-                annotate_error(req_file, message)
-                continue
+    for name, versions in sorted(agent_dependencies.items()):
+        if not verify_dependency('Agent', name, versions):
+            failed = True
 
-            agent_versions = sorted(versions, key=lambda v: str(v))
-            check_versions = sorted(check_dependencies[name], key=lambda v: str(v))
+        if name not in check_dependencies:  # Looks like this fails because of the per check run....
+            failed = True
+            message = f'Stale dependency needs to be removed by syncing: {name}'
+            echo_failure(message)
+            annotate_error(agent_dependencies_file, message)
+            continue
 
-            if agent_versions != check_versions:
+        agent_versions = sorted(versions, key=lambda v: str(v))
+        check_versions = sorted(check_dependencies[name], key=lambda v: str(v))
+
+        if agent_versions != check_versions:
+            failed = True
+            message = (
+                f'Version mismatch for dependency `{name}`:'
+                f'    Agent: {" | ".join(map(str, agent_versions))}'
+                f'    Checks: {" | ".join(map(str, check_versions))}'
+            )
+            echo_failure(message)
+            annotate_error(agent_dependencies_file, message)
+            continue
+
+        for specifier_set in agent_versions:
+            agent_dependency_definitions = versions[specifier_set]
+            check_dependency_definitions = check_dependencies[name][specifier_set]
+
+            agent_markers = sorted(
+                set(get_marker_string(dependency_definition) for dependency_definition in agent_dependency_definitions)
+            )
+            check_markers = sorted(
+                set(get_marker_string(dependency_definition) for dependency_definition in check_dependency_definitions)
+            )
+
+            if agent_markers != check_markers:
                 failed = True
                 message = (
-                    f'Version mismatch for dependency `{name}`:'
-                    f'    Agent: {" | ".join(map(str, agent_versions))}'
-                    f'    Checks: {" | ".join(map(str, check_versions))}'
+                    f'Marker mismatch for dependency `{name}`:'
+                    f'    Agent: {" | ".join(agent_markers)}'
+                    f'    Checks: {" | ".join(check_markers)}'
                 )
                 echo_failure(message)
-                annotate_error(req_file, message)
-                continue
-
-            for specifier_set in agent_versions:
-                agent_dependency_definitions = versions[specifier_set]
-                check_dependency_definitions = check_dependencies[name][specifier_set]
-
-                agent_markers = sorted(
-                    set(
-                        get_marker_string(dependency_definition)
-                        for dependency_definition in agent_dependency_definitions
-                    )
-                )
-                check_markers = sorted(
-                    set(
-                        get_marker_string(dependency_definition)
-                        for dependency_definition in check_dependency_definitions
-                    )
-                )
-
-                if agent_markers != check_markers:
-                    failed = True
-                    message = (
-                        f'Marker mismatch for dependency `{name}`:'
-                        f'    Agent: {" | ".join(agent_markers)}'
-                        f'    Checks: {" | ".join(check_markers)}'
-                    )
-                    echo_failure(message)
-                    annotate_error(agent_dependencies_file, message)
+                annotate_error(agent_dependencies_file, message)
 
         if failed:
             abort()
